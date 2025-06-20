@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
 import {
   Table,
   TableBody,
@@ -20,122 +22,168 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, Edit, Trash2, Eye, Database } from "lucide-react";
+import { MoreHorizontal, Edit, Trash2, Eye, Database, Loader2, Plus } from "lucide-react";
+import { CustomerDialog } from "./customer-dialog";
+import { ConfirmDialog } from "@/components/common/confirm-dialog";
 
-// Mock data - in a real app this would come from an API
-const mockCustomers = [
-  {
-    id: "1",
-    name: "Acme Corporation",
-    contactPerson: "John Smith",
-    email: "john.smith@acme.com",
-    phone: "+1 (555) 123-4567",
-    devices: 12,
-    lastActivity: "2024-01-15",
-    status: "active"
-  },
-  {
-    id: "2", 
-    name: "Tech Solutions Inc",
-    contactPerson: "Sarah Johnson",
-    email: "sarah.j@techsolutions.com",
-    phone: "+1 (555) 987-6543",
-    devices: 8,
-    lastActivity: "2024-01-10",
-    status: "active"
-  },
-  {
-    id: "3",
-    name: "Global Enterprises",
-    contactPerson: "Michael Brown",
-    email: "m.brown@globalent.com", 
-    phone: "+1 (555) 456-7890",
-    devices: 24,
-    lastActivity: "2023-12-28",
-    status: "inactive"
-  },
-  {
-    id: "4",
-    name: "Startup Co",
-    contactPerson: "Emma Wilson",
-    email: "emma@startup.co",
-    phone: "+1 (555) 321-0987",
-    devices: 3,
-    lastActivity: "2024-01-12",
-    status: "active"
-  }
-];
+interface Customer {
+  id: string;
+  name: string;
+  contactPerson: string | null;
+  email: string | null;
+  phone: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 interface CustomersTableProps {
   searchQuery: string;
 }
 
 export function CustomersTable({ searchQuery }: CustomersTableProps) {
-  const [customers, setCustomers] = useState(mockCustomers);
+  const router = useRouter();
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
 
-  console.log("CustomersTable rendering with search:", searchQuery);
+  // Fetch customers from API
+  useEffect(() => {
+    const fetchCustomers = async () => {
+      try {
+        const response = await fetch("/api/customers");
+        if (!response.ok) {
+          throw new Error("Failed to fetch customers");
+        }
+        const data = await response.json();
+        setCustomers(data.data);
+      } catch (error) {
+        console.error("Error fetching customers:", error);
+        toast.error("Failed to load customers");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchCustomers();
+  }, []);
 
   // Filter customers based on search query
-  const filteredCustomers = customers.filter(customer =>
-    customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    customer.contactPerson.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    customer.email.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredCustomers = customers.filter(customer => {
+    if (!searchQuery) return true;
+    
+    const search = searchQuery.toLowerCase();
+    return (
+      customer.name.toLowerCase().includes(search) ||
+      (customer.contactPerson?.toLowerCase().includes(search) ?? false) ||
+      (customer.email?.toLowerCase().includes(search) ?? false) ||
+      (customer.phone?.toLowerCase().includes(search) ?? false)
+    );
+  });
 
-  const handleEdit = (customerId: string) => {
-    console.log("Edit customer:", customerId);
-    // TODO: Implement edit functionality
+  const handleEdit = (customer: Customer) => {
+    setEditingCustomer(customer);
+    setIsDialogOpen(true);
   };
 
-  const handleDelete = (customerId: string) => {
-    console.log("Delete customer:", customerId);
-    // TODO: Implement delete functionality with confirmation
-    setCustomers(customers.filter(c => c.id !== customerId));
+  const handleDelete = async (customerId: string) => {
+    try {
+      setIsDeleting(customerId);
+      const response = await fetch(`/api/customers/${customerId}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to delete customer");
+      }
+
+      // Update local state
+      setCustomers(customers.filter(c => c.id !== customerId));
+      toast.success("Customer deleted successfully");
+    } catch (error) {
+      console.error("Error deleting customer:", error);
+      toast.error("Failed to delete customer");
+    } finally {
+      setIsDeleting(null);
+    }
   };
 
   const handleViewDevices = (customerId: string) => {
-    console.log("View devices for customer:", customerId);
     // TODO: Navigate to devices page filtered by customer
+    console.log("View devices for customer:", customerId);
   };
 
-  const getStatusBadge = (status: string) => {
-    return status === "active" ? (
-      <Badge className="bg-success-100 text-success-700">Active</Badge>
-    ) : (
-      <Badge className="bg-gray-100 text-gray-700">Inactive</Badge>
-    );
+  const handleSuccess = () => {
+    // Refetch customers after successful operation
+    const fetchCustomers = async () => {
+      try {
+        const response = await fetch("/api/customers");
+        if (response.ok) {
+          const data = await response.json();
+          setCustomers(data.data);
+        }
+      } catch (error) {
+        console.error("Error fetching customers:", error);
+        toast.error("Failed to refresh customer list");
+      }
+    };
+
+    fetchCustomers();
+    setIsDialogOpen(false);
+    setEditingCustomer(null);
+  };
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
   };
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center justify-between">
-          <span>All Customers ({filteredCustomers.length})</span>
-          <Badge variant="outline" className="text-sm">
-            {customers.filter(c => c.status === "active").length} Active
-          </Badge>
-        </CardTitle>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-2xl font-bold">Customers</CardTitle>
+      </CardHeader>
+      <CardHeader className="pt-0">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">
+            {filteredCustomers.length} {filteredCustomers.length === 1 ? 'customer' : 'customers'} found
+          </p>
+        </div>
       </CardHeader>
       <CardContent>
         <div className="rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Customer</TableHead>
-                <TableHead>Contact Person</TableHead>
+                <TableHead>Company</TableHead>
+                <TableHead>Contact</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Phone</TableHead>
-                <TableHead>Devices</TableHead>
-                <TableHead>Last Activity</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-[70px]">Actions</TableHead>
+                <TableHead>Created</TableHead>
+                <TableHead className="w-[100px] text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredCustomers.length === 0 ? (
+              {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center">
-                    {searchQuery ? "No customers found matching your search." : "No customers yet."}
+                  <TableCell colSpan={6} className="h-24 text-center">
+                    <div className="flex items-center justify-center">
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Loading customers...
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ) : filteredCustomers.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={6} className="h-24 text-center">
+                    {searchQuery 
+                      ? "No customers found matching your search."
+                      : "No customers yet."}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -144,24 +192,37 @@ export function CustomersTable({ searchQuery }: CustomersTableProps) {
                     <TableCell className="font-medium">
                       {customer.name}
                     </TableCell>
-                    <TableCell>{customer.contactPerson}</TableCell>
-                    <TableCell className="text-blue-600 hover:underline">
-                      {customer.email}
-                    </TableCell>
-                    <TableCell>{customer.phone}</TableCell>
+                    <TableCell>{customer.contactPerson || '-'}</TableCell>
                     <TableCell>
-                      <div className="flex items-center space-x-1">
-                        <Database className="h-4 w-4 text-gray-400" />
-                        <span>{customer.devices}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-gray-500">
-                      {new Date(customer.lastActivity).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell>
-                      {getStatusBadge(customer.status)}
+                      {customer.email ? (
+                        <a 
+                          href={`mailto:${customer.email}`} 
+                          className="text-blue-600 hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {customer.email}
+                        </a>
+                      ) : (
+                        '-'
+                      )}
                     </TableCell>
                     <TableCell>
+                      {customer.phone ? (
+                        <a 
+                          href={`tel:${customer.phone}`} 
+                          className="hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {customer.phone}
+                        </a>
+                      ) : (
+                        '-'
+                      )}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {formatDate(customer.createdAt)}
+                    </TableCell>
+                    <TableCell className="text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" className="h-8 w-8 p-0">
@@ -171,26 +232,29 @@ export function CustomersTable({ searchQuery }: CustomersTableProps) {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                          <DropdownMenuItem onClick={() => handleViewDevices(customer.id)}>
-                            <Eye className="mr-2 h-4 w-4" />
-                            View Details
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleViewDevices(customer.id)}>
-                            <Database className="mr-2 h-4 w-4" />
-                            Manage Devices
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={() => handleEdit(customer.id)}>
+                          <DropdownMenuItem onClick={() => handleEdit(customer)}>
                             <Edit className="mr-2 h-4 w-4" />
                             Edit
                           </DropdownMenuItem>
-                          <DropdownMenuItem 
-                            className="text-red-600"
-                            onClick={() => handleDelete(customer.id)}
+                          <DropdownMenuSeparator />
+                          <ConfirmDialog
+                            title="Delete Customer"
+                            description={`Are you sure you want to delete ${customer.name}? This action cannot be undone.`}
+                            confirmText={isDeleting === customer.id ? "Deleting..." : "Delete"}
+                            onConfirm={() => handleDelete(customer.id)}
                           >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Delete
-                          </DropdownMenuItem>
+                            <DropdownMenuItem 
+                              className="text-red-600"
+                              onSelect={(e) => e.preventDefault()}
+                            >
+                              {isDeleting === customer.id ? (
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              ) : (
+                                <Trash2 className="mr-2 h-4 w-4" />
+                              )}
+                              Delete
+                            </DropdownMenuItem>
+                          </ConfirmDialog>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -201,6 +265,21 @@ export function CustomersTable({ searchQuery }: CustomersTableProps) {
           </Table>
         </div>
       </CardContent>
+      
+      {/* Edit Customer Dialog */}
+      <CustomerDialog 
+        customer={editingCustomer || undefined}
+        open={isDialogOpen && !!editingCustomer}
+        onOpenChange={(open: boolean) => {
+          if (!open) {
+            setEditingCustomer(null);
+            setIsDialogOpen(false);
+          } else {
+            setIsDialogOpen(true);
+          }
+        }}
+        onSuccess={handleSuccess}
+      />
     </Card>
   );
 }
